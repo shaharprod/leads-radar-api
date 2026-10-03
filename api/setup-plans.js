@@ -1,11 +1,13 @@
-// GET /api/setup-plans — idempotent: creates the "Leads Radar" product and its 3 subscription plans in PayPal
-// if they don't exist yet, and returns their IDs. Safe to call repeatedly (finds existing by name).
+// GET /api/setup-plans — idempotent: creates the "Leads Radar" product and its subscription plans in PayPal
+// if they don't exist yet, syncs the price of existing plans to PLANS below (update-pricing-schemes; affects
+// new subscriptions only, existing subscribers keep their price), and returns their IDs. Safe to call repeatedly.
 const { token, BASE } = require("../lib/paypal");
 
 const PRODUCT = { name: "Leads Radar", description: "Leads Radar - business lead scanner (SaaS subscription)", type: "SERVICE", category: "SOFTWARE" };
 const PLANS = [
   { key: "monthly", name: "Leads Radar - Monthly", price: "97.00", unit: "MONTH", count: 1, cycles: 0 },
-  { key: "annual", name: "Leads Radar - Annual (one payment)", price: "1020.00", unit: "YEAR", count: 1, cycles: 0 }
+  // 970 = 10 x 97: "pay for 10 months, get 12" (lowered from 1020 on 2026-10-03)
+  { key: "annual", name: "Leads Radar - Annual (one payment)", price: "970.00", unit: "YEAR", count: 1, cycles: 0 }
 ];
 // Plans that must NOT be offered any more; deactivated if found active.
 const RETIRED = ["Leads Radar - Annual (12 payments of 85)"];
@@ -33,7 +35,19 @@ module.exports = async (req, res) => {
     const out = {};
     for (const p of PLANS) {
       let plan = existing.find(x => x.name === p.name);
-      let created = false;
+      let created = false, priceUpdated = false, priceBefore = null;
+      if (plan) {
+        // the list endpoint has no prices; fetch the plan to compare its current fixed price with PLANS
+        const full = await api("GET", "/v1/billing/plans/" + plan.id, null, t);
+        const cyc = (full.billing_cycles || []).find(c => c.tenure_type === "REGULAR") || (full.billing_cycles || [])[0];
+        priceBefore = cyc && cyc.pricing_scheme && cyc.pricing_scheme.fixed_price ? cyc.pricing_scheme.fixed_price.value : null;
+        if (priceBefore !== null && Number(priceBefore) !== Number(p.price)) {
+          await api("POST", "/v1/billing/plans/" + plan.id + "/update-pricing-schemes", {
+            pricing_schemes: [{ billing_cycle_sequence: cyc.sequence || 1, pricing_scheme: { fixed_price: { value: p.price, currency_code: "ILS" } } }]
+          }, t);
+          priceUpdated = true;
+        }
+      }
       if (!plan) {
         plan = await api("POST", "/v1/billing/plans", {
           product_id: product.id, name: p.name, status: "ACTIVE",
@@ -44,7 +58,7 @@ module.exports = async (req, res) => {
         }, t);
         created = true;
       }
-      out[p.key] = { id: plan.id, name: p.name, price_ils: p.price, every: p.count + " " + p.unit, cycles: p.cycles || "unlimited", status: plan.status, created };
+      out[p.key] = { id: plan.id, name: p.name, price_ils: p.price, every: p.count + " " + p.unit, cycles: p.cycles || "unlimited", status: plan.status, created, price_before: priceBefore, price_updated: priceUpdated };
     }
     const retired = {};
     for (const name of RETIRED) {
