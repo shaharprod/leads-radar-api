@@ -1,6 +1,7 @@
 // GET /api/diag — verifies the server can actually talk to Stytch and PayPal with the configured keys.
 // Reports only ok / error type, never any key values.
 const { _call } = require("../lib/stytch");
+const { getWebhookId, WEBHOOK_URL } = require("../lib/paypal");
 
 async function paypalToken() {
   const BASE = process.env.PAYPAL_ENV === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
@@ -20,6 +21,7 @@ module.exports = async (req, res) => {
   try { const d = await _call("POST", "/users/search", { limit: 1 }); out.stytch = { ok: true, users_found: (d.results || []).length }; }
   catch (e) { out.stytch = { ok: false, status: e.status || null, error: (e.data && e.data.error_type) || e.message }; }
   try { out.paypal = await paypalToken(); } catch (e) { out.paypal = { ok: false, error: e.message }; }
-  out.paypal_webhook_id_set = Boolean(process.env.PAYPAL_WEBHOOK_ID);
+  try { const id = await getWebhookId(); out.paypal_webhook = { ok: true, id, url: WEBHOOK_URL }; }
+  catch (e) { out.paypal_webhook = { ok: false, error: e.message }; }
   res.end(JSON.stringify(out));
 };
