@@ -50,6 +50,11 @@ module.exports = async (req, res) => {
         await setAccess(u.user_id, { status: "one_time", paid_until: addDays(days) });
       }
     }
+    // forward the verified event to the Leads Radar audit server (login gate + admin screen keep their own subscribers list)
+    if (process.env.LR_NOTIFY_URL) {
+      try { await fetch(process.env.LR_NOTIFY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(event), signal: AbortSignal.timeout(8000) }); }
+      catch (e) { console.error("notify failed", e.message); }
+    }
     res.statusCode = 200; res.end(JSON.stringify({ ok: true, type }));
   } catch (e) {
     // non-200 makes PayPal retry later
