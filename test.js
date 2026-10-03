@@ -1,7 +1,8 @@
 const assert = require("assert");
-process.env.STYTCH_PROJECT_ID="p"; process.env.STYTCH_SECRET="s"; process.env.PAYPAL_CLIENT_ID="c"; process.env.PAYPAL_SECRET="x"; process.env.PAYPAL_WEBHOOK_ID="w";
+process.env.STYTCH_PROJECT_ID="p"; process.env.STYTCH_SECRET="s"; process.env.PAYPAL_CLIENT_ID="c"; process.env.PAYPAL_SECRET="x"; 
 let users = {}; let verified = true; const log=[];
 global.fetch = async (url, opt={}) => {
+  if (url.endsWith("/v1/notifications/webhooks") && (opt.method||"GET")==="GET") return {ok:true,status:200,json:async()=>({webhooks:[{id:"WH-1",url:"https://leads-radar-api.vercel.app/api/paypal-webhook"}]})};
   const body = opt.body && opt.body.startsWith && opt.body.startsWith("{") ? JSON.parse(opt.body) : {};
   log.push(opt.method+" "+url);
   const ok = (d)=>({ok:true,status:200,json:async()=>d});
