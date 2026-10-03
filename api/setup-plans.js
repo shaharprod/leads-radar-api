@@ -5,9 +5,10 @@ const { token, BASE } = require("../lib/paypal");
 const PRODUCT = { name: "Leads Radar", description: "Leads Radar - business lead scanner (SaaS subscription)", type: "SERVICE", category: "SOFTWARE" };
 const PLANS = [
   { key: "monthly", name: "Leads Radar - Monthly", price: "97.00", unit: "MONTH", count: 1, cycles: 0 },
-  { key: "annual", name: "Leads Radar - Annual (one payment)", price: "1020.00", unit: "YEAR", count: 1, cycles: 0 },
-  { key: "annual12", name: "Leads Radar - Annual (12 payments of 85)", price: "85.00", unit: "MONTH", count: 1, cycles: 12 }
+  { key: "annual", name: "Leads Radar - Annual (one payment)", price: "1020.00", unit: "YEAR", count: 1, cycles: 0 }
 ];
+// Plans that must NOT be offered any more; deactivated if found active.
+const RETIRED = ["Leads Radar - Annual (12 payments of 85)"];
 
 async function api(method, path, body, t) {
   const r = await fetch(BASE + path, { method, headers: { Authorization: "Bearer " + t, "Content-Type": "application/json", Prefer: "return=representation" }, body: body ? JSON.stringify(body) : undefined });
@@ -45,7 +46,14 @@ module.exports = async (req, res) => {
       }
       out[p.key] = { id: plan.id, name: p.name, price_ils: p.price, every: p.count + " " + p.unit, cycles: p.cycles || "unlimited", status: plan.status, created };
     }
-    res.end(JSON.stringify({ ok: true, env: process.env.PAYPAL_ENV || "sandbox", product: { id: product.id, created: createdProduct }, plans: out }));
+    const retired = {};
+    for (const name of RETIRED) {
+      const plan = existing.find(x => x.name === name);
+      if (!plan) continue;
+      if (plan.status === "ACTIVE") { await api("POST", "/v1/billing/plans/" + plan.id + "/deactivate", null, t); retired[name] = { id: plan.id, status: "INACTIVE", deactivated_now: true }; }
+      else retired[name] = { id: plan.id, status: plan.status, deactivated_now: false };
+    }
+    res.end(JSON.stringify({ retired, ok: true, env: process.env.PAYPAL_ENV || "sandbox", product: { id: product.id, created: createdProduct }, plans: out }));
   } catch (e) {
     res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: e.message }));
   }
